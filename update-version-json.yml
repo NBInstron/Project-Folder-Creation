@@ -1,0 +1,70 @@
+name: SafeDB - Update version.json on Tag
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  update-version:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Checkout
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # 2. Extract version + tag message
+      - name: Extract version
+        run: |
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          echo "VERSION=${TAG_NAME}" >> $GITHUB_ENV
+
+          TAG_MESSAGE=$(git for-each-ref refs/tags/${TAG_NAME} --format='%(contents)' 2>/dev/null || echo "No release notes")
+
+          # Safe JSON formatting
+          SAFE_MESSAGE=$(printf '%s' "$TAG_MESSAGE" | sed ':a;N;$!ba;s/\\/\\\\/g;s/"/\\"/g;s/\n/\\n/g')
+
+          echo "MESSAGE=${SAFE_MESSAGE}" >> $GITHUB_ENV
+
+      # 3. Create version.json
+      - name: Create version.json
+        run: |
+          mkdir -p src/assets
+          
+          cat > src/assets/version.json << EOF
+          {
+            "version": "${VERSION}",
+            "date": "$(date +'%Y-%m-%d %H:%M:%S UTC')",
+            "notes": "${MESSAGE}",
+            "commit": "${GITHUB_SHA::7}"
+          }
+          EOF
+
+          cat src/assets/version.json
+
+      # 4. Set author from last commit (your Git Bash identity)
+      - name: Set Git user
+        run: |
+          git config user.name "$(git log -1 --pretty=format:'%an')"
+          git config user.email "$(git log -1 --pretty=format:'%ae')"
+
+      # 5. Commit & Push (SAFE + CLEAN)
+      - name: Commit & Push
+        run: |
+          git add src/assets/version.json
+          git commit -m "chore: update version.json for ${VERSION} [skip ci]" || echo "No changes"
+          git push origin HEAD:main
+
+      # 6. (Optional) Create GitHub Release
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ env.VERSION }}
+          name: Release ${{ env.VERSION }}
+          body: ${{ env.MESSAGE }}
