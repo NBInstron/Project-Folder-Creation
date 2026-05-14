@@ -1,7 +1,9 @@
 import logging
 import unittest
 from unittest.mock import Mock
+from unittest.mock import patch
 
+from services.drive_service import DriveService
 from services.drive_service import get_or_create_folder
 
 
@@ -14,6 +16,36 @@ def make_list_response(files):
 class DriveServiceTests(unittest.TestCase):
     def setUp(self):
         self.logger = logging.getLogger("test")
+
+    def test_build_service_uses_oauth_credentials_without_custom_http(self):
+        config = Mock(oauth_token_file="missing.json")
+        credentials = Mock()
+        credentials.valid = True
+        service = Mock()
+
+        oauth_token_json = (
+            '{"token":"access-token",'
+            '"refresh_token":"refresh-token",'
+            '"token_uri":"https://oauth2.googleapis.com/token",'
+            '"client_id":"client-id",'
+            '"client_secret":"client-secret",'
+            '"scopes":["https://www.googleapis.com/auth/drive"]}'
+        )
+
+        with patch.dict(
+            "os.environ",
+            {"GOOGLE_OAUTH_TOKEN_JSON": oauth_token_json},
+            clear=False,
+        ), patch(
+            "services.drive_service.Credentials.from_authorized_user_info",
+            return_value=credentials,
+        ), patch("services.drive_service.build", return_value=service) as mock_build:
+            drive_service = DriveService(config)
+
+        self.assertIs(drive_service._service, service)
+        _, kwargs = mock_build.call_args
+        self.assertIs(kwargs["credentials"], credentials)
+        self.assertNotIn("http", kwargs)
 
     def test_get_or_create_folder_creates_then_skips(self):
         service = Mock()

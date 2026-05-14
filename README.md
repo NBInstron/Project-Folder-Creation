@@ -1,8 +1,8 @@
 # ERP Google Drive Project Folder Webhook
 
 Flask webhook service that receives an ERP `AFTER_INSERT` event, validates `ProjectName`
-and `Customer`, then creates the project folder tree in Google Drive using a service
-account.
+and `Customer`, then creates the project folder tree in Google Drive using OAuth
+user credentials.
 
 ## Files
 
@@ -17,16 +17,15 @@ account.
 
 1. Open Google Cloud Console and create or select a project.
 2. Enable **Google Drive API** for that project.
-3. Create a **Service Account**.
-4. Create a JSON key for the service account and download it.
-5. Rename the downloaded key to `credentials.json` and place it in this project root,
-   or set `GOOGLE_APPLICATION_CREDENTIALS` to the full path of the JSON file.
-6. Copy the service account email from the JSON file or Cloud Console.
-7. In Google Drive, share the existing parent folder or shared drive location with
-   that service account email as an editor.
-8. Optional but recommended: put your `Demo Projects` folder inside that shared
+3. Create an OAuth client for the Google account that owns or can edit the target
+   Drive folder.
+4. Generate an OAuth authorized-user token with the
+   `https://www.googleapis.com/auth/drive` scope and save it as `oauth_token.json`.
+   On Render, set `GOOGLE_OAUTH_TOKEN_JSON` to the full token JSON value instead
+   of relying on a local file.
+5. Optional but recommended: put your `Demo Projects` folder inside that shared
    parent and set `DEMO_PROJECTS_PARENT_ID` to the parent folder ID. If it is empty,
-   the app searches all Drive locations visible to the service account.
+   the app searches all Drive locations visible to the OAuth user.
 
 ## Local Setup
 
@@ -37,10 +36,17 @@ pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
+Generate the OAuth token locally:
+
+```powershell
+python scripts/generate_oauth_token.py --client-secrets client_secret.json --token-file oauth_token.json
+```
+
 Edit `.env` as needed:
 
 ```dotenv
-GOOGLE_APPLICATION_CREDENTIALS=credentials.json
+OAUTH_TOKEN_FILE=oauth_token.json
+GOOGLE_OAUTH_TOKEN_JSON=
 DEMO_PROJECTS_FOLDER_NAME=Demo Projects
 DEMO_PROJECTS_PARENT_ID=
 WEBHOOK_TOKEN=change-this-token

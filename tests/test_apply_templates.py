@@ -16,7 +16,7 @@ def test_ensure_project_scope_templates_idempotent():
 
     Requirements:
       - Set `TEST_PROJECT_FOLDER_ID` env var to the project folder id to test against.
-      - Ensure `GOOGLE_APPLICATION_CREDENTIALS` is set and valid.
+      - Ensure `OAUTH_TOKEN_FILE` or `GOOGLE_OAUTH_TOKEN_JSON` is set and valid.
     """
     if not TEST_PROJECT_FOLDER_ID:
         pytest.skip("Set TEST_PROJECT_FOLDER_ID to run integration test")
