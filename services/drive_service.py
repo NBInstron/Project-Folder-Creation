@@ -1,3 +1,4 @@
+import time
 import logging
 import mimetypes
 from pathlib import Path
@@ -297,14 +298,25 @@ class DriveService:
                     else None
                 )
 
-                folder = get_or_create_folder(
-                    service=self._service,
-                    name=folder_name,
-                    parent_id=parent_id,
-                    logger=self._logger,
-                    project_key=per_folder_key,
-                    created_map=created_map,
-                )
+                try:
+
+                    folder = get_or_create_folder(
+                        service=self._service,
+                        name=folder_name,
+                        parent_id=parent_id,
+                        logger=self._logger,
+                        project_key=per_folder_key,
+                        created_map=created_map,
+                    )
+
+                except Exception as error:
+
+                    self._logger.exception(
+                        "Folder creation failed: %s",
+                        folder_name
+                    )
+
+                    continue
 
                 if folder.get("_was_created"):
 
@@ -509,18 +521,32 @@ def get_or_create_folder(
             f"and trashed=false"
         )
 
-    response = (
-        service.files()
-        .list(
-            q=query,
-            spaces="drive",
-            fields="files(id,name,webViewLink)",
-            includeItemsFromAllDrives=True,
-            supportsAllDrives=True,
-            pageSize=1,
+    time.sleep(0.5)
+    
+    try:
+
+        response = (
+            service.files()
+            .list(
+                q=query,
+                spaces="drive",
+                fields="files(id, name, webViewLink, appProperties, description)",
+                includeItemsFromAllDrives=True,
+                supportsAllDrives=True,
+                pageSize=1,
+            )
+            .execute()
         )
-        .execute()
-    )
+
+    except Exception as error:
+
+        logger.exception("Google Drive list folder failed: %s", name)
+
+        return {
+            "id": "ERROR",
+            "name": name,
+            "_was_created": False
+        }
 
     folders = response.get("files", [])
 
