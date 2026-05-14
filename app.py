@@ -53,7 +53,7 @@ def create_app() -> Flask:
     @app.errorhandler(DriveAuthError)
     def handle_drive_auth_error(error: DriveAuthError):
 
-        app.logger.exception("Google Drive authentication failed")
+        app.logger.exception(f"Google Drive authentication failed: {error}")
 
         return jsonify({
             "status": "error",
@@ -63,11 +63,11 @@ def create_app() -> Flask:
     @app.errorhandler(HttpError)
     def handle_google_api_error(error: HttpError):
 
-        app.logger.exception("Google Drive API request failed")
+        app.logger.exception(f"Google Drive API request failed: {error}")
 
         return jsonify({
             "status": "error",
-            "message": "Google Drive API failure"
+            "message": str(error)
         }), 502
 
     @app.errorhandler(Exception)
