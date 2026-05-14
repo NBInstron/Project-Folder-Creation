@@ -211,6 +211,24 @@ class DriveService:
 
         return folder
 
+    def get_or_create_folder(
+        self,
+        name: str,
+        parent_id: str | None = None,
+        description: str | None = None,
+        project_key: str | None = None,
+        created_map: dict | None = None,
+    ):
+
+        return get_or_create_folder(
+            service=self._service,
+            name=name,
+            parent_id=parent_id,
+            logger=self._logger,
+            project_key=project_key,
+            created_map=created_map,
+            description=description,
+        )
     # =========================================================
     # ENSURE FOLDER TREE
     # =========================================================
