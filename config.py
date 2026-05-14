@@ -35,7 +35,7 @@ class Config:
             flask_host=os.getenv("FLASK_HOST", "0.0.0.0"),
             flask_port=int(os.getenv("FLASK_PORT", "5000")),
             flask_debug=os.getenv("FLASK_DEBUG", "false").lower() == "true",
-            use_oauth=os.getenv("USE_OAUTH", "true").lower() == "true",
+            use_oauth=os.getenv("USE_OAUTH", "false").lower() == "true",
             oauth_client_secrets=os.getenv("OAUTH_CLIENT_SECRETS", "client_secret.json"),
             oauth_token_file=os.getenv("OAUTH_TOKEN_FILE", "oauth_token.json"),
         )
