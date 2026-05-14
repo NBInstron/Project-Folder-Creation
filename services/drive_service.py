@@ -3,13 +3,14 @@ import mimetypes
 from pathlib import Path
 from typing import Any
 
-from google.oauth2.credentials import Credentials
+
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from googleapiclient.errors import HttpError
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
-import json
+from google.oauth2 import service_account
+
+
+
 
 
 FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
@@ -281,53 +282,39 @@ class DriveService:
         return summary
 
     def _build_service(self, credentials_file: Path):
-        # Use OAuth InstalledAppFlow (user account) to authenticate to Google Drive.
-        # This replaces service-account authentication so uploads go into the end-user's My Drive.
-        oauth_secrets = getattr(self._config, "oauth_client_secrets", "client_secret.json")
-        oauth_token_file = getattr(self._config, "oauth_token_file", "oauth_token.json")
+        try:
 
-        client_path = Path(oauth_secrets)
-        token_path = Path(oauth_token_file)
-
-        if not client_path.exists():
-            raise DriveAuthError(
-                f"OAuth client secrets not found: {client_path}. Place client_secret.json in the project root or set `oauth_client_secrets` in config."
+            self._logger.info(
+                "Using credentials file: %s",
+                credentials_file
             )
 
-        try:
-            creds = None
-            # Try loading existing token
-            if token_path.exists():
-                try:
-                    creds = Credentials.from_authorized_user_file(str(token_path), scopes=DRIVE_SCOPES)
-                except Exception:
-                    creds = None
+            credentials = service_account.Credentials.from_service_account_file(
+            str(credentials_file),
+            scopes=DRIVE_SCOPES
+            )
 
-            # If no valid credentials, run the InstalledAppFlow
-            if not creds or not creds.valid:
-                if creds and creds.expired and creds.refresh_token:
-                    creds.refresh(Request())
-                else:
-                    flow = InstalledAppFlow.from_client_secrets_file(str(client_path), scopes=DRIVE_SCOPES)
-                    # `run_local_server` prints an authorization URL prompt. We set a clear message to surface it.
-                    auth_prompt = (
-                        "Please visit this URL to authorize access to your Google Drive:\n{url}\n"
-                        "After authorizing, the flow will complete and the token will be saved."
-                    )
-                    creds = flow.run_local_server(port=0, authorization_prompt_message=auth_prompt, open_browser=True)
+            service = build(
+            "drive",
+            "v3",
+            credentials=credentials,
+            cache_discovery=False
+            )
 
-                # Persist the credentials for the next run
-                try:
-                    with open(token_path, "w") as token_f:
-                        token_f.write(creds.to_json())
-                        self._logger.info("Saved OAuth token to %s", token_path)
-                except Exception:
-                    self._logger.warning("Failed to write OAuth token to %s", token_path)
+            self._logger.info("Google Drive authentication successful")
 
-            return build("drive", "v3", credentials=creds, cache_discovery=False)
+            return service
+
         except Exception as error:
-            raise DriveAuthError(f"Could not authenticate with Google Drive: {error}") from error
 
+            self._logger.exception(
+                "Google Drive authentication failed"
+            )
+
+            raise DriveAuthError(
+                f"Could not authenticate with Google Drive: {error}"
+            ) from error
+            
     def get_or_create_folder(
         self,
         name: str,
