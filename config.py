@@ -11,6 +11,9 @@ class Config:
     demo_projects_folder_name: str
     demo_projects_parent_id: str | None
     webhook_token: str | None
+    webhook_async: bool
+    folder_job_workers: int
+    processed_dir: Path
     log_file: Path
     flask_host: str
     flask_port: int
@@ -28,6 +31,9 @@ class Config:
             demo_projects_folder_name=os.getenv("DEMO_PROJECTS_FOLDER_NAME", "Projects"),
             demo_projects_parent_id=demo_projects_parent_id,
             webhook_token=os.getenv("WEBHOOK_TOKEN") or None,
+            webhook_async=os.getenv("WEBHOOK_ASYNC", "true").lower() == "true",
+            folder_job_workers=int(os.getenv("FOLDER_JOB_WORKERS", "2")),
+            processed_dir=Path(os.getenv("PROCESSED_DIR", "processed")),
             log_file=Path(os.getenv("LOG_FILE", "logs/app.log")),
             flask_host=os.getenv("FLASK_HOST", "0.0.0.0"),
             flask_port=int(os.getenv("FLASK_PORT", "5000")),

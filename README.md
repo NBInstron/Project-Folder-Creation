@@ -44,6 +44,9 @@ GOOGLE_APPLICATION_CREDENTIALS=credentials.json
 DEMO_PROJECTS_FOLDER_NAME=Demo Projects
 DEMO_PROJECTS_PARENT_ID=
 WEBHOOK_TOKEN=change-this-token
+WEBHOOK_ASYNC=true
+FOLDER_JOB_WORKERS=2
+PROCESSED_DIR=processed
 FLASK_HOST=0.0.0.0
 FLASK_PORT=5000
 LOG_FILE=logs/app.log
@@ -59,6 +62,19 @@ For production, run behind a reverse proxy and use a WSGI server:
 
 ```powershell
 gunicorn "app:app" --bind 0.0.0.0:5000
+```
+
+On Render, leave the start command empty so Render uses `Procfile`, or set it to:
+
+```bash
+gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120 --graceful-timeout 120 --access-logfile -
+```
+
+`/webhook/after-insert` starts the full Google Drive folder-tree creation as a
+background job and returns `202 Accepted` with a `jobId`. Check the job state with:
+
+```text
+GET /webhook/jobs/<jobId>
 ```
 
 On Windows production servers, use a Windows-compatible WSGI server or host the
@@ -84,10 +100,12 @@ Expected response:
 
 ```json
 {
-  "status": "success",
-  "message": "Folder created"
+  "status": "accepted",
+  "message": "Project folder setup started",
+  "jobId": "b0f353b68f69f11076c8c39498a4ebd2",
+  "statusUrl": "/webhook/jobs/b0f353b68f69f11076c8c39498a4ebd2"
 }
 ```
 
-The actual response also includes Drive folder IDs and counts of created/existing
-folders.
+When the background job completes, `GET /webhook/jobs/<jobId>` includes Drive
+folder details and counts of created/existing folders.
