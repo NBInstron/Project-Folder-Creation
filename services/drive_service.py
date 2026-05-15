@@ -1,16 +1,10 @@
 import logging
-import mimetypes
-import json
-import os
-import socket
 from pathlib import Path
 from typing import Any
 
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
+from google.oauth2 import service_account
 from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
-from googleapiclient.http import MediaFileUpload
+
 
 FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
 DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"]
@@ -21,525 +15,322 @@ class DriveAuthError(RuntimeError):
 
 
 class DriveService:
-
     def __init__(self, config: Any):
         self._config = config
         self._logger = logging.getLogger(__name__)
-        self._service = self._build_service()
+        self._service = self._build_service(config.credentials_file)
 
-    def _load_credentials(self) -> Credentials:
-        token_json = (
-            os.getenv("GOOGLE_OAUTH_TOKEN_JSON")
-            or os.getenv("OAUTH_TOKEN_JSON")
-        )
-
-        if token_json:
-            try:
-                token_info = json.loads(token_json)
-            except json.JSONDecodeError as error:
-                raise DriveAuthError(
-                    "Google OAuth token JSON environment variable is not valid JSON"
-                ) from error
-
-            return Credentials.from_authorized_user_info(
-                token_info,
-                scopes=DRIVE_SCOPES
-            )
-
-        token_file = Path(self._config.oauth_token_file or "oauth_token.json")
-
-        if not token_file.is_file():
+    def _build_service(self, credentials_file: Path):
+        if not credentials_file.exists():
             raise DriveAuthError(
-                "Google OAuth token not found. Set GOOGLE_OAUTH_TOKEN_JSON "
-                f"or provide OAUTH_TOKEN_FILE at {token_file}."
+                f"Credentials file not found: {credentials_file}. "
+                "Set GOOGLE_APPLICATION_CREDENTIALS or place credentials.json in the project root."
             )
-
-        return Credentials.from_authorized_user_file(
-            str(token_file),
-            scopes=DRIVE_SCOPES
-        )
-
-    def _refresh_credentials(self, credentials: Credentials) -> Credentials:
-        if credentials.valid:
-            return credentials
-
-        if credentials.refresh_token:
-            credentials.refresh(Request())
-            self._save_refreshed_credentials(credentials)
-            return credentials
-
-        raise DriveAuthError(
-            "Google OAuth token is invalid or missing a refresh token. "
-            "Generate a new OAuth token with the Drive scope."
-        )
-
-    def _save_refreshed_credentials(self, credentials: Credentials) -> None:
-        if os.getenv("GOOGLE_OAUTH_TOKEN_JSON") or os.getenv("OAUTH_TOKEN_JSON"):
-            return
-
-        token_file = Path(self._config.oauth_token_file or "oauth_token.json")
 
         try:
-            token_file.write_text(credentials.to_json(), encoding="utf-8")
-        except OSError:
-            self._logger.warning(
-                "Could not persist refreshed Google OAuth token to %s",
-                token_file,
+            credentials = service_account.Credentials.from_service_account_file(
+                str(credentials_file),
+                scopes=DRIVE_SCOPES,
             )
-
-    def _build_service(self):
-
-        try:
-
-            credentials = self._refresh_credentials(self._load_credentials())
-
-            service = build(
-                "drive",
-                "v3",
-                credentials=credentials,
-                cache_discovery=False,
-            )
-
-            self._logger.info("Google Drive client initialized successfully")
-
-            return service
-
+            return build("drive", "v3", credentials=credentials, cache_discovery=False)
         except Exception as error:
-
-            self._logger.exception("Google Drive authentication failed")
-
-            raise DriveAuthError(
-                f"Could not authenticate with Google Drive: {error}"
-            ) from error
-
-    @staticmethod
-    def _escape_query_value(value: str) -> str:
-        return value.replace("\\", "\\\\").replace("'", "\\'")
-
-    def find_folder(
-        self,
-        name: str,
-        parent_id: str | None = None,
-    ) -> dict | None:
-
-        escaped_name = self._escape_query_value(name)
-
-        query = (
-            f"name='{escaped_name}' "
-            f"and mimeType='{FOLDER_MIME_TYPE}' "
-            f"and trashed=false"
-        )
-
-        if parent_id:
-            query += f" and '{parent_id}' in parents"
-
-        response = (
-            self._service.files()
-            .list(
-                q=query,
-                spaces="drive",
-                fields="files(id,name,webViewLink)",
-                includeItemsFromAllDrives=True,
-                supportsAllDrives=True,
-                pageSize=1,
-            )
-            .execute(num_retries=3)
-        )
-
-        folders = response.get("files", [])
-        return folders[0] if folders else None
+            raise DriveAuthError(f"Could not authenticate with Google Drive: {error}") from error
 
     def get_or_create_folder(
         self,
         name: str,
         parent_id: str | None = None,
         description: str | None = None,
-    ) -> dict:
+        project_key: str | None = None,
+        created_map: dict | None = None,
+    ) -> dict[str, str]:
+        # Delegate to module-level helper that performs a name+parent search
+        # and (optionally) uses an appProperties-based project_key to ensure
+        # idempotent creations across calls.
+        return get_or_create_folder(
+            service=self._service,
+            name=name,
+            parent_id=parent_id,
+            logger=self._logger,
+            project_key=project_key,
+            created_map=created_map,
+            description=description,
+        )
 
-        try:
 
-            escaped_name = self._escape_query_value(name)
 
-            query = (
-                f"name='{escaped_name}' "
-                f"and mimeType='{FOLDER_MIME_TYPE}' "
-                f"and trashed=false"
+    def find_folder(self, name: str, parent_id: str | None = None) -> dict[str, str] | None:
+        query_parts = [
+            f"mimeType = '{FOLDER_MIME_TYPE}'",
+            "trashed = false",
+            f"name = '{self._escape_query_value(name)}'",
+        ]
+        if parent_id:
+            query_parts.append(f"'{self._escape_query_value(parent_id)}' in parents")
+
+        response = (
+            self._service.files()
+            .list(
+                q=" and ".join(query_parts),
+                spaces="drive",
+                fields="files(id, name, webViewLink)",
+                includeItemsFromAllDrives=True,
+                supportsAllDrives=True,
+                pageSize=10,
             )
-
-            if parent_id:
-                query += f" and '{parent_id}' in parents"
-
-            response = (
-                self._service.files()
-                .list(
-                    q=query,
-                    spaces="drive",
-                    fields="files(id,name,webViewLink)",
-                    includeItemsFromAllDrives=True,
-                    supportsAllDrives=True,
-                    pageSize=1,
-                )
-                .execute(num_retries=3)
+            .execute()
+        )
+        folders = response.get("files", [])
+        if len(folders) > 1:
+            self._logger.warning(
+                "Found %s folders named %s under parent %s; using the first",
+                len(folders),
+                name,
+                parent_id or "visible Drive scope",
             )
+        return folders[0] if folders else None
 
-            folders = response.get("files", [])
+    def create_folder(
+        self,
+        name: str,
+        parent_id: str | None = None,
+        description: str | None = None,
+    ) -> dict[str, str]:
+        metadata: dict[str, Any] = {"name": name, "mimeType": FOLDER_MIME_TYPE}
+        if parent_id:
+            metadata["parents"] = [parent_id]
+        if description:
+            metadata["description"] = description
 
-            if folders:
-
-                folder = folders[0]
-                folder["_was_created"] = False
-
-                self._logger.info(
-                    "Folder exists: %s",
-                    folder["name"]
-                )
-
-                return folder
-
-            metadata = {
-                "name": name,
-                "mimeType": FOLDER_MIME_TYPE,
-            }
-
-            if parent_id:
-                metadata["parents"] = [parent_id]
-
-            if description:
-                metadata["description"] = description
-
-            folder = (
-                self._service.files()
-                .create(
-                    body=metadata,
-                    fields="id,name,webViewLink",
-                    supportsAllDrives=True,
-                )
-                .execute(num_retries=3)
+        folder = (
+            self._service.files()
+            .create(
+                body=metadata,
+                fields="id, name, webViewLink",
+                supportsAllDrives=True,
             )
-
-            folder["_was_created"] = True
-
-            self._logger.info(
-                "Folder created: %s",
-                folder["name"]
-            )
-
-            return folder
-
-        except socket.timeout:
-            self._logger.exception("Google Drive timeout")
-            raise Exception("Google Drive timeout")
-
-        except HttpError as error:
-            self._logger.exception("Google Drive API error")
-            raise Exception(str(error))
-
-        except Exception as error:
-            self._logger.exception("Folder creation failed")
-            raise Exception(str(error))
+            .execute()
+        )
+        self._logger.info("Created folder name=%s id=%s", name, folder["id"])
+        return folder
 
     def ensure_folder_tree(
         self,
         parent_id: str,
-        folder_tree: dict,
-    ):
-
-        summary = {
-            "created_count": 0,
-            "existing_count": 0,
-            "errors": 0
-        }
-
-        self._ensure_folder_tree_recursive(
-            parent_id,
-            folder_tree,
-            summary,
-            level=0
-        )
-
+        folder_tree: dict[str, dict],
+        project_key: str | None = None,
+    ) -> dict[str, int]:
+        summary = {"created_count": 0, "existing_count": 0}
+        # created_map stores in-memory created or resolved folders for this run
+        created_map: dict[str, dict] = {}
+        self._ensure_folder_tree_recursive(parent_id, folder_tree, summary, project_key=project_key, created_map=created_map)
         return summary
-
-    def _ensure_folder_tree_recursive(
-        self,
-        parent_id: str,
-        folder_tree: dict,
-        summary: dict,
-        level: int = 0
-    ):
-
-        # Prevent infinite recursion
-        if level > 20:
-            self._logger.warning("Max recursion depth reached")
-            return
-
-        for folder_name, children in folder_tree.items():
-
-            try:
-
-                self._logger.info(
-                    "Processing folder: %s",
-                    folder_name
-                )
-
-                folder = self.get_or_create_folder(
-                    name=folder_name,
-                    parent_id=parent_id,
-                )
-
-                if folder.get("_was_created"):
-                    summary["created_count"] += 1
-                else:
-                    summary["existing_count"] += 1
-
-                if isinstance(children, dict) and children:
-
-                    self._ensure_folder_tree_recursive(
-                        parent_id=folder["id"],
-                        folder_tree=children,
-                        summary=summary,
-                        level=level + 1
-                    )
-
-            except Exception as error:
-
-                self._logger.exception(
-                    "Failed folder: %s",
-                    folder_name
-                )
-
-                summary["errors"] += 1
-
-                continue
 
     def create_project_folder(
         self,
         project_name: str,
         customer_name: str,
-        projects_folder_name: str,
+        projects_folder_name: str = "Projects",
         description: str | None = None,
-    ) -> dict:
+    ) -> dict[str, str]:
+        """Find (or create) the top-level `projects_folder_name` folder and
+        create a child folder named "{ProjectName}-{Customer name}" inside it.
 
-        projects_folder = self.get_or_create_folder(
-            name=projects_folder_name,
-            parent_id=self._config.demo_projects_parent_id,
-        )
+        Returns the created or existing project folder resource.
+        """
+        # Normalize and compose the folder name
+        safe_project = project_name.replace("/", "-").strip()
+        safe_customer = customer_name.replace("/", "-").strip()
+        folder_name = f"{safe_project}-{safe_customer}"
 
-        project_folder = self.get_or_create_folder(
-            name=project_name,
+        # Find or create the parent "Projects" folder at root scope
+        projects_folder = self.find_folder(projects_folder_name, parent_id=None)
+        if not projects_folder:
+            self._logger.info("Top-level folder '%s' not found; creating it", projects_folder_name)
+            projects_folder = self.create_folder(projects_folder_name)
+
+        # Create (or get) the project folder under Projects
+        project_key = f"project:{safe_project}:{safe_customer}"
+        project_folder = get_or_create_folder(
+            service=self._service,
+            name=folder_name,
             parent_id=projects_folder["id"],
-            description=description or f"Customer: {customer_name}",
+            logger=self._logger,
+            project_key=project_key,
+            created_map=None,
+            description=description,
         )
-
-        if project_folder.get("_was_created"):
-            self.ensure_folder_tree(
-                parent_id=project_folder["id"],
-                folder_tree=self._get_project_folder_tree(),
-            )
-            self.ensure_project_scope_templates(project_folder["id"])
-
         return project_folder
 
-    @staticmethod
-    def _get_project_folder_tree() -> dict:
-        from services.folder_structure import PROJECT_FOLDER_TREE
-
-        return PROJECT_FOLDER_TREE
-
-    def upload_file_if_not_exists(
+    def _ensure_folder_tree_recursive(
         self,
-        local_path: Path,
         parent_id: str,
-        target_name: str | None = None,
-    ):
-
-        try:
-
-            if not local_path.exists():
-                return None
-
-            name = target_name or local_path.name
-
-            escaped_name = self._escape_query_value(name)
-
-            query = (
-                f"name='{escaped_name}' "
-                f"and '{parent_id}' in parents "
-                f"and trashed=false"
+        folder_tree: dict[str, dict],
+        summary: dict[str, int],
+        project_key: str | None = None,
+        created_map: dict | None = None,
+    ) -> None:
+        for folder_name, children in folder_tree.items():
+            # For idempotency use a per-folder project key composed of the project_key base
+            # and the specific folder name: ProjectKeyBase::FolderName
+            per_folder_key = f"{project_key}::{folder_name}" if project_key else None
+            # Prepare created_map
+            if created_map is None:
+                created_map = {}
+            folder = get_or_create_folder(
+                self._service,
+                name=folder_name,
+                parent_id=parent_id,
+                logger=self._logger,
+                project_key=per_folder_key,
+                created_map=created_map,
             )
-
-            response = (
-                self._service.files()
-                .list(
-                    q=query,
-                    spaces="drive",
-                    fields="files(id,name)",
-                    includeItemsFromAllDrives=True,
-                    supportsAllDrives=True,
-                    pageSize=1,
-                )
-                .execute(num_retries=3)
-            )
-
-            files = response.get("files", [])
-
-            if files:
-
-                file_data = files[0]
-                file_data["_was_uploaded"] = False
-
-                return file_data
-
-            mime_type, _ = mimetypes.guess_type(str(local_path))
-
-            media = MediaFileUpload(
-                str(local_path),
-                mimetype=mime_type or "application/octet-stream",
-                resumable=False
-            )
-
-            metadata = {
-                "name": name,
-                "parents": [parent_id]
-            }
-
-            uploaded = (
-                self._service.files()
-                .create(
-                    body=metadata,
-                    media_body=media,
-                    fields="id,name",
-                    supportsAllDrives=True,
-                )
-                .execute(num_retries=3)
-            )
-
-            uploaded["_was_uploaded"] = True
-
-            return uploaded
-
-        except Exception as error:
-
-            self._logger.exception(
-                "File upload failed"
-            )
-
-            return None
-
-    def ensure_project_scope_templates(
-        self,
-        project_folder_id: str,
-        template_dir: Path | None = None,
-    ) -> dict:
-
-        template_dir = template_dir or Path(__file__).resolve().parents[1] / "Templates"
-
-        summary = {
-            "files_uploaded": 0,
-            "files_skipped": 0,
-            "errors": 0,
-        }
-
-        if not template_dir.exists():
-            self._logger.warning("Template directory not found: %s", template_dir)
-            summary["errors"] += 1
-            return summary
-
-        project_folder = (
-            self._service.files()
-            .get(
-                fileId=project_folder_id,
-                fields="id,name",
-                supportsAllDrives=True,
-            )
-            .execute(num_retries=3)
-        )
-        project_name = project_folder.get("name", "ProjectName")
-
-        for local_path in sorted(path for path in template_dir.iterdir() if path.is_file()):
-            target_name = local_path.name.replace("ProjectName", project_name)
-
-            uploaded = self.upload_file_if_not_exists(
-                local_path=local_path,
-                parent_id=project_folder_id,
-                target_name=target_name,
-            )
-
-            if not uploaded:
-                summary["errors"] += 1
-                continue
-
-            if uploaded.get("_was_uploaded"):
-                summary["files_uploaded"] += 1
+            # If the returned folder was already present, we consider it existing; otherwise created.
+            # We infer this from whether the folder was found during the list call (module helper logged it).
+            # To keep the accounting accurate without extra API calls, check if the folder name matched
+            # an existing entry by attempting a light re-check of the list response was avoided; instead
+            # increment existing_count when the folder creation did not happen (determined by logs is not
+            # feasible), so use conservative approach: if folder was found via list, get_or_create_folder
+            # returns that folder and we increment existing_count. To implement this, the helper returns a
+            # dict with a marker `_was_created`.
+            if folder.get("_was_created"):
+                summary["created_count"] += 1
             else:
-                summary["files_skipped"] += 1
+                summary["existing_count"] += 1
 
-        return summary
+            if children:
+                # propagate the same base project_key so deeper folders receive ProjectKeyBase::ChildName
+                self._ensure_folder_tree_recursive(folder["id"], children, summary, project_key=project_key, created_map=created_map)
+
+    @staticmethod
+    def _escape_query_value(value: str) -> str:
+        return value.replace("\\", "\\\\").replace("'", "\\'")
 
 
 def get_or_create_folder(
-    service: Any,
+    service,
     name: str,
     parent_id: str | None = None,
     logger: logging.Logger | None = None,
+    project_key: str | None = None,
     created_map: dict | None = None,
+    description: str | None = None,
 ) -> dict:
+    """Search for a folder by name + parent and create it if not found.
 
-    logger = logger or logging.getLogger(__name__)
-    created_map = created_map if created_map is not None else {}
-    cache_key = (parent_id, name)
+    Args:
+        service: googleapiclient.discovery.Resource (Drive API service)
+        name: Folder name to search/create
+        parent_id: Parent folder ID to scope the search
+        logger: Optional logger to emit messages
 
-    if cache_key in created_map:
-        return created_map[cache_key]
+    Returns:
+        dict: folder resource (contains at least 'id' and 'name'). Contains special key
+              '_was_created' set to True when the folder was created by this call.
+    """
+    if logger is None:
+        logger = logging.getLogger(__name__)
 
-    escaped_name = DriveService._escape_query_value(name)
+    # Use the DriveService escaping helper defined above
+    try:
+        escaped_name = DriveService._escape_query_value(name)
+    except Exception:
+        # Fallback simple escape
+        escaped_name = name.replace("'", "\\'")
 
-    query = (
-        f"name='{escaped_name}' "
-        f"and mimeType='{FOLDER_MIME_TYPE}' "
-        f"and trashed=false"
-    )
+    # Prepare created_map key for in-memory protection
+    if created_map is None:
+        created_map = {}
+    map_key = f"{parent_id}::{name}"
+    if map_key in created_map:
+        logger.info("Folder exists in-memory, skipping name=%s", name)
+        existing = created_map[map_key]
+        existing["_was_created"] = False
+        return existing
 
+    # First, try to find by exact name + parent
+    query = f"name='{escaped_name}' and mimeType='{FOLDER_MIME_TYPE}' and trashed=false"
     if parent_id:
-        query += f" and '{parent_id}' in parents"
+        try:
+            escaped_parent = DriveService._escape_query_value(parent_id)
+        except Exception:
+            escaped_parent = parent_id.replace("'", "\\'")
+        query = f"name='{escaped_name}' and '{escaped_parent}' in parents and mimeType='{FOLDER_MIME_TYPE}' and trashed=false"
 
     response = (
         service.files()
         .list(
             q=query,
             spaces="drive",
-            fields="files(id,name,webViewLink)",
+            fields="files(id, name, webViewLink, appProperties, description)",
             includeItemsFromAllDrives=True,
             supportsAllDrives=True,
             pageSize=1,
         )
-        .execute(num_retries=3)
+        .execute()
     )
 
     folders = response.get("files", [])
-
     if folders:
-        logger.info("Folder exists: %s", folders[0].get("name"))
-        return folders[0]
+        folder = folders[0]
+        logger.info("Folder exists, skipping name=%s id=%s", name, folder.get("id"))
+        folder["_was_created"] = False
+        # cache in-memory
+        created_map[map_key] = folder
+        return folder
 
-    metadata = {
-        "name": name,
-        "mimeType": FOLDER_MIME_TYPE,
-    }
+    # If not found by name, and project_key provided, try to find by appProperties
+    if project_key:
+        # Query for appProperties matching project_key under the parent
+        # Drive query for appProperties: "appProperties has { key='project_key' and value='...'}"
+        try:
+            escaped_key_value = DriveService._escape_query_value(project_key)
+        except Exception:
+            escaped_key_value = project_key.replace("'", "\\'")
 
+        appprop_query = f"appProperties has {{ key='project_key' and value='{escaped_key_value}' }} and mimeType='{FOLDER_MIME_TYPE}' and trashed=false"
+        if parent_id:
+            appprop_query = f"'{escaped_parent}' in parents and " + appprop_query
+
+        resp2 = (
+            service.files()
+            .list(
+                q=appprop_query,
+                spaces="drive",
+                fields="files(id, name, webViewLink, appProperties, description)",
+                includeItemsFromAllDrives=True,
+                supportsAllDrives=True,
+                pageSize=1,
+            )
+            .execute()
+        )
+        folders2 = resp2.get("files", [])
+        if folders2:
+            folder = folders2[0]
+            logger.info("Folder exists, skipping (by project key) name=%s id=%s", name, folder.get("id"))
+            folder["_was_created"] = False
+            created_map[map_key] = folder
+            return folder
+
+    # Create folder since not found
+    metadata: dict[str, Any] = {"name": name, "mimeType": FOLDER_MIME_TYPE}
     if parent_id:
         metadata["parents"] = [parent_id]
+    if description:
+        metadata["description"] = description
+    if project_key:
+        metadata.setdefault("appProperties", {})["project_key"] = project_key
 
     folder = (
         service.files()
         .create(
             body=metadata,
-            fields="id,name,webViewLink",
+            fields="id, name, webViewLink, appProperties",
             supportsAllDrives=True,
         )
-        .execute(num_retries=3)
+        .execute()
     )
-
-    created_map[cache_key] = folder
-    logger.info("Folder created: %s", folder.get("name"))
-
+    logger.info("Folder created name=%s id=%s", name, folder.get("id"))
+    folder["_was_created"] = True
+    created_map[map_key] = folder
     return folder
