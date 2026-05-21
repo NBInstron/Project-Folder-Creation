@@ -1,0 +1,9 @@
+{
+  "customer": "AKOLA LTD",
+  "error": "<HttpError 403 when requesting https://www.googleapis.com/drive/v3/files/1u1OQju9fdJUnwekH_eK9tGDxwkCIBMdv/copy?fields=id%2C+name%2C+webViewLink%2C+mimeType&supportsAllDrives=true&alt=json returned \"Service Accounts do not have storage quota. Leverage shared drives (https://developers.google.com/workspace/drive/api/guides/about-shareddrives), or use OAuth delegation (http://support.google.com/a/answer/7281227) instead.\". Details: \"[{'message': 'Service Accounts do not have storage quota. Leverage shared drives (https://developers.google.com/workspace/drive/api/guides/about-shareddrives), or use OAuth delegation (http://support.google.com/a/answer/7281227) instead.', 'domain': 'usageLimits', 'reason': 'storageQuotaExceeded'}]\">",
+  "failedAt": "2026-05-18T09:23:03+00:00",
+  "jobId": "4ef202e40da7dda28720709bb1b56e8b",
+  "project": "ITP-25",
+  "status": "failed",
+  "updatedAt": "2026-05-18T09:23:03+00:00"
+}

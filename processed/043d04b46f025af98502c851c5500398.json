@@ -1,0 +1,9 @@
+{
+  "customer": "AKOLA LTD",
+  "error": "The read operation timed out",
+  "failedAt": "2026-05-15T12:23:45+00:00",
+  "jobId": "043d04b46f025af98502c851c5500398",
+  "project": "ITP-19",
+  "status": "failed",
+  "updatedAt": "2026-05-15T12:23:45+00:00"
+}

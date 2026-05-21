@@ -7,7 +7,15 @@ from dotenv import load_dotenv
 
 @dataclass(frozen=True)
 class Config:
+    google_auth_mode: str
     credentials_file: Path
+    google_impersonated_user: str | None
+    google_shared_drive_id: str | None
+    drive_projects_folder_id: str | None
+    drive_template_root_folder_name: str
+    drive_template_root_folder_id: str | None
+    drive_template_folder_name: str
+    drive_template_folder_id: str | None
     demo_projects_folder_name: str
     demo_projects_parent_id: str | None
     webhook_token: str | None
@@ -27,7 +35,24 @@ class Config:
         demo_projects_parent_id = os.getenv("DEMO_PROJECTS_PARENT_ID") or None
 
         return cls(
+            google_auth_mode=os.getenv("GOOGLE_AUTH_MODE", "service_account").lower(),
             credentials_file=Path(credentials),
+            google_impersonated_user=os.getenv("GOOGLE_IMPERSONATED_USER") or None,
+            google_shared_drive_id=os.getenv("GOOGLE_SHARED_DRIVE_ID", "0AKpxt6N6-Ua8Uk9PVA") or None,
+            drive_projects_folder_id=os.getenv(
+                "DRIVE_PROJECTS_FOLDER_ID",
+                "1j632OZrHEb6Ixcs8t8b5c_cluf2QaUZ0",
+            ) or None,
+            drive_template_root_folder_name=os.getenv(
+                "DRIVE_TEMPLATE_ROOT_FOLDER_NAME",
+                "ITA-XXX_AI_Enebelment",
+            ),
+            drive_template_root_folder_id=os.getenv("DRIVE_TEMPLATE_ROOT_FOLDER_ID") or None,
+            drive_template_folder_name=os.getenv("DRIVE_TEMPLATE_FOLDER_NAME", "Template"),
+            drive_template_folder_id=os.getenv(
+                "DRIVE_TEMPLATE_FOLDER_ID",
+                "1W7TE6nozGxW7fDkxKozXoRkGJDeQBaEt",
+            ) or None,
             demo_projects_folder_name=os.getenv("DEMO_PROJECTS_FOLDER_NAME", "Projects"),
             demo_projects_parent_id=demo_projects_parent_id,
             webhook_token=os.getenv("WEBHOOK_TOKEN") or None,

@@ -5,6 +5,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
 from app import create_app
+from routes.webhook import _create_project_tree
 
 
 class WebhookRouteTests(unittest.TestCase):
@@ -62,6 +63,39 @@ class WebhookRouteTests(unittest.TestCase):
         self.assertEqual(data["status"], "success")
         self.assertEqual(data["folderId"], "proj123")
         mock_drive.create_project_folder.assert_called_once()
+
+    @patch("routes.webhook.DriveService")
+    def test_create_project_tree_copies_project_scope_files(self, mock_drive_service_cls):
+        mock_drive = Mock()
+        mock_drive.get_folder_by_id.return_value = {"id": "demo-projects", "name": "Projects"}
+        mock_drive.get_or_create_folder.side_effect = [
+            {"id": "project-root", "name": "MyProject"},
+        ]
+        mock_drive.ensure_folder_tree.return_value = {"created_count": 1, "existing_count": 2}
+        mock_drive.copy_project_scope_files.return_value = {
+            "copied_count": 2,
+            "existing_count": 0,
+        }
+        mock_drive_service_cls.return_value = mock_drive
+
+        result = _create_project_tree(
+            self.app.config["APP_CONFIG"],
+            project_name="MyProject",
+            customer="ACME",
+        )
+
+        mock_drive.get_folder_by_id.assert_called_once_with(
+            self.app.config["APP_CONFIG"].drive_projects_folder_id
+        )
+        mock_drive.copy_project_scope_files.assert_called_once_with(
+            project_folder_id="project-root",
+            project_name="MyProject",
+            template_root_folder_name=self.app.config["APP_CONFIG"].drive_template_root_folder_name,
+            template_folder_name=self.app.config["APP_CONFIG"].drive_template_folder_name,
+            template_root_folder_id=self.app.config["APP_CONFIG"].drive_template_root_folder_id,
+            template_folder_id=self.app.config["APP_CONFIG"].drive_template_folder_id,
+        )
+        self.assertEqual(result["copy_summary"]["copied_count"], 2)
 
 
 if __name__ == "__main__":

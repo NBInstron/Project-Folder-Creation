@@ -1,0 +1,9 @@
+{
+  "customer": "AKOLA LTD",
+  "error": "Template file not found in Google Drive Template folder: 01. <ProjectName>_CLT_03_R01.xlsx",
+  "failedAt": "2026-05-18T07:29:34+00:00",
+  "jobId": "cbbb8b4c2b2c116c4fddb1f71a9ed2c1",
+  "project": "ITP-24",
+  "status": "failed",
+  "updatedAt": "2026-05-18T07:29:34+00:00"
+}

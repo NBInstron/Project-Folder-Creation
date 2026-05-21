@@ -2,13 +2,14 @@
 
 Flask webhook service that receives an ERP `AFTER_INSERT` event, validates `ProjectName`
 and `Customer`, then creates the project folder tree in Google Drive using a service
-account.
+account. After the folder tree is ready, it copies project-scope templates from
+Google Shared Drive with the Drive API `files.copy` operation.
 
 ## Files
 
 - `app.py` - Flask application factory, health check, and global error handlers.
 - `routes/webhook.py` - HTTP POST webhook handler and payload validation.
-- `services/drive_service.py` - Google Drive authentication and idempotent folder creation.
+- `services/drive_service.py` - Google Drive service-account authentication, idempotent folder creation, and Drive-side template copying.
 - `services/folder_structure.py` - Folder hierarchy converted from the Windows batch file.
 - `logging_config.py` - Console and rotating file logging.
 - `config.py` - Environment-based configuration.
@@ -22,11 +23,16 @@ account.
 5. Rename the downloaded key to `credentials.json` and place it in this project root,
    or set `GOOGLE_APPLICATION_CREDENTIALS` to the full path of the JSON file.
 6. Copy the service account email from the JSON file or Cloud Console.
-7. In Google Drive, share the existing parent folder or shared drive location with
-   that service account email as an editor.
-8. Optional but recommended: put your `Demo Projects` folder inside that shared
-   parent and set `DEMO_PROJECTS_PARENT_ID` to the parent folder ID. If it is empty,
-   the app searches all Drive locations visible to the service account.
+7. Add the service account to the Shared Drive as a member with Contributor or
+   Content manager access.
+8. Keep `Projects` and `ITA-XXX_AI_Enebelment/Template` inside that Shared Drive.
+9. The template folder must contain:
+   - CLT template containing `CLT_03_R01` in the filename, such as `Template/01. <ProjectName>_CLT_03_R01.xlsx`
+   - SOW template containing `SOW` in the filename, such as `Template/02. <ProjectName>_SOW.docx`
+10. Set `GOOGLE_SHARED_DRIVE_ID`, `DRIVE_PROJECTS_FOLDER_ID`, and
+    `DRIVE_TEMPLATE_FOLDER_ID`. The included defaults match the current Shared Drive:
+    `0AJxQyDwRTE3HUk9PVA`, `1PXrPJgxcsz_R9e1i62kRxKG2TxfuI7HY`, and
+    `1PbwV2FsD3GWIloH_nDYyy2jsCH90cHGP`.
 
 ## Local Setup
 
@@ -41,7 +47,15 @@ Edit `.env` as needed:
 
 ```dotenv
 GOOGLE_APPLICATION_CREDENTIALS=credentials.json
-DEMO_PROJECTS_FOLDER_NAME=Demo Projects
+GOOGLE_AUTH_MODE=service_account
+GOOGLE_IMPERSONATED_USER=
+GOOGLE_SHARED_DRIVE_ID=0AJxQyDwRTE3HUk9PVA
+DRIVE_PROJECTS_FOLDER_ID=1PXrPJgxcsz_R9e1i62kRxKG2TxfuI7HY
+DRIVE_TEMPLATE_ROOT_FOLDER_NAME=ITA-XXX_AI_Enebelment
+DRIVE_TEMPLATE_ROOT_FOLDER_ID=
+DRIVE_TEMPLATE_FOLDER_NAME=Template
+DRIVE_TEMPLATE_FOLDER_ID=1PbwV2FsD3GWIloH_nDYyy2jsCH90cHGP
+DEMO_PROJECTS_FOLDER_NAME=Projects
 DEMO_PROJECTS_PARENT_ID=
 WEBHOOK_TOKEN=change-this-token
 WEBHOOK_ASYNC=true
@@ -108,4 +122,10 @@ Expected response:
 ```
 
 When the background job completes, `GET /webhook/jobs/<jobId>` includes Drive
-folder details and counts of created/existing folders.
+folder details and counts of created/existing folders plus copied/existing
+template files. Target files are created in `05. Project/03. Project Scope` as:
+
+```text
+01.<ProjectName>_CLT_03_R01.xlsm
+02.<ProjectName>_SOW.docx
+```

@@ -41,6 +41,7 @@ def _validate_payload(payload: dict) -> tuple[str, str]:
     if CONTROL_CHARS.search(project_name):
         raise ValueError("ProjectName contains invalid control characters")
 
+    logger.info("Payload validation succeeded project=%s customer=%s", project_name, customer)
     return project_name, customer
 
 
@@ -123,10 +124,19 @@ def _begin_job(processed_dir: Path, project_name: str, customer: str) -> tuple[s
 def _create_project_tree(config: Any, project_name: str, customer: str) -> dict[str, Any]:
     drive_service = DriveService(config)
 
-    demo_projects_folder = drive_service.get_or_create_folder(
-        name=config.demo_projects_folder_name,
-        parent_id=config.demo_projects_parent_id,
-    )
+    projects_folder_id = getattr(config, "drive_projects_folder_id", None)
+    if projects_folder_id:
+        demo_projects_folder = drive_service.get_folder_by_id(projects_folder_id)
+        logger.info(
+            "Using configured Shared Drive Projects folder id=%s name=%s",
+            demo_projects_folder.get("id"),
+            demo_projects_folder.get("name"),
+        )
+    else:
+        demo_projects_folder = drive_service.get_or_create_folder(
+            name=config.demo_projects_folder_name,
+            parent_id=config.demo_projects_parent_id,
+        )
 
     project_folder = drive_service.get_or_create_folder(
         name=project_name,
@@ -139,15 +149,26 @@ def _create_project_tree(config: Any, project_name: str, customer: str) -> dict[
         folder_tree=PROJECT_FOLDER_TREE,
     )
 
+    copy_summary = drive_service.copy_project_scope_files(
+        project_folder_id=project_folder["id"],
+        project_name=project_name,
+        template_root_folder_name=getattr(config, "drive_template_root_folder_name", "ITA-XXX_AI_Enebelment"),
+        template_folder_name=getattr(config, "drive_template_folder_name", "Template"),
+        template_root_folder_id=getattr(config, "drive_template_root_folder_id", None),
+        template_folder_id=getattr(config, "drive_template_folder_id", None),
+    )
+
     return {
         "project_folder": project_folder,
         "summary": summary,
+        "copy_summary": copy_summary,
     }
 
 
 def _mark_job_completed(config: Any, job_id: str, project_name: str, customer: str, result: dict[str, Any]) -> None:
     project_folder = result["project_folder"]
     summary = result["summary"]
+    copy_summary = result.get("copy_summary", {})
     _write_job_state(
         config.processed_dir,
         job_id,
@@ -160,6 +181,8 @@ def _mark_job_completed(config: Any, job_id: str, project_name: str, customer: s
             "webViewLink": project_folder.get("webViewLink"),
             "createdFolders": summary["created_count"],
             "existingFolders": summary["existing_count"],
+            "copiedFiles": copy_summary.get("copied_count", 0),
+            "existingFiles": copy_summary.get("existing_count", 0),
             "completedAt": _utc_now(),
         },
     )
@@ -196,11 +219,13 @@ def _run_project_tree_job(config: Any, job_id: str, project_name: str, customer:
 
     summary = result["summary"]
     logger.info(
-        "Folder setup complete job_id=%s project=%s created=%s existing=%s",
+        "Folder setup complete job_id=%s project=%s created=%s existing=%s copied=%s existing_files=%s",
         job_id,
         project_name,
         summary["created_count"],
         summary["existing_count"],
+        result.get("copy_summary", {}).get("copied_count", 0),
+        result.get("copy_summary", {}).get("existing_count", 0),
     )
     _mark_job_completed(config, job_id, project_name, customer, result)
 
@@ -272,6 +297,7 @@ def after_insert_webhook():
 
     _mark_job_completed(config, job_id, project_name, customer, result)
     summary = result["summary"]
+    copy_summary = result.get("copy_summary", {})
 
     return jsonify({
         "status": "success",
@@ -281,6 +307,8 @@ def after_insert_webhook():
         "customer": customer,
         "createdFolders": summary["created_count"],
         "existingFolders": summary["existing_count"],
+        "copiedFiles": copy_summary.get("copied_count", 0),
+        "existingFiles": copy_summary.get("existing_count", 0),
     }), 201
 
 
