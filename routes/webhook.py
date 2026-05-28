@@ -246,7 +246,13 @@ def _mark_job_failed(config: Any, job_id: str, project_name: str, customer: str,
 
 @webhook_bp.post("/webhook/after-insert")
 def after_insert_webhook():
+    print("WEBHOOK RECEIVED")
+    logger.info("WEBHOOK RECEIVED")
+
     payload = request.get_json(silent=True)
+    print(payload)
+    logger.info("WEBHOOK PAYLOAD %s", payload)
+
     if not isinstance(payload, dict):
         return jsonify({"status": "error", "message": "Invalid JSON body"}), 400
 
@@ -310,6 +316,18 @@ def after_insert_webhook():
         "copiedFiles": copy_summary.get("copied_count", 0),
         "existingFiles": copy_summary.get("existing_count", 0),
     }), 201
+
+
+@webhook_bp.post("/webhook")
+def webhook_probe():
+    print("WEBHOOK RECEIVED")
+    logger.info("WEBHOOK RECEIVED")
+
+    data = request.get_json(silent=True)
+    print(data)
+    logger.info("WEBHOOK PAYLOAD %s", data)
+
+    return jsonify({"status": "received"}), 200
 
 
 @webhook_bp.get("/webhook/jobs/<job_id>")

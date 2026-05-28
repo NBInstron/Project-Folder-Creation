@@ -2,6 +2,7 @@ import os
 
 from flask import Flask, jsonify
 from googleapiclient.errors import HttpError
+from werkzeug.exceptions import HTTPException
 
 from config import Config
 from logging_config import configure_logging
@@ -47,6 +48,10 @@ def create_app() -> Flask:
             "status": "ok"
         }), 200
 
+    @app.get("/favicon.ico")
+    def favicon():
+        return "", 204
+
     # -----------------------------
     # Error Handlers
     # -----------------------------
@@ -69,6 +74,16 @@ def create_app() -> Flask:
             "status": "error",
             "message": "Google Drive API failure"
         }), 502
+
+    @app.errorhandler(HTTPException)
+    def handle_http_error(error: HTTPException):
+
+        app.logger.warning("HTTP error %s for path=%s", error.code, getattr(error, "description", ""))
+
+        return jsonify({
+            "status": "error",
+            "message": error.description
+        }), error.code
 
     @app.errorhandler(Exception)
     def handle_unexpected_error(error: Exception):
